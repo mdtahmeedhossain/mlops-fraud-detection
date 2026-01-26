@@ -2,6 +2,36 @@
 
 End-to-end ML pipeline for credit card fraud detection (IEEE-CIS dataset). XGBoost model served via FastAPI, tracked with MLflow, monitored with Evidently, containerized with Docker.
 
+## Pipeline
+
+```
+┌─────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  Raw Data   │───▶│  Preprocessing   │───▶│    Training     │
+│  (CSV)      │    │  (fit on train)  │    │  (XGBoost)      │
+└─────────────┘    └──────────────────┘    └─────────────────┘
+                           │                        │
+                           ▼                        ▼
+                   ┌──────────────────┐    ┌─────────────────┐
+                   │    Artifacts     │    │     Model       │
+                   │ (encoders,       │    │   (joblib)      │
+                   │  medians, etc)   │    └─────────────────┘
+                   └──────────────────┘             │
+                           │                        │
+                           ▼                        ▼
+┌─────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│  API Input  │───▶│  Preprocessing   │───▶│   Inference     │───▶ Prediction
+│  (JSON)     │    │  (transform)     │    │                 │
+└─────────────┘    └──────────────────┘    └─────────────────┘
+                                                    │
+                                                    ▼
+                                           ┌─────────────────┐
+                                           │ Drift Monitor   │
+                                           │ (Evidently)     │
+                                           └─────────────────┘
+```
+
+Training and inference use the **same preprocessing artifacts**, avoiding train/serve skew.
+
 ## Setup
 
 ```bash
@@ -58,13 +88,22 @@ Other endpoints: `GET /health`, `GET /model-info`
 ```
 src/
   config.py            - paths, hyperparams, feature lists
-  data_processing.py   - feature engineering, encoding, splits
+  preprocessing.py     - feature engineering, encoding, imputation (shared by train/inference)
+  data_processing.py   - data loading and train/test splitting
   train.py             - training loop with MLflow logging
-  predict.py           - inference with feature alignment
+  predict.py           - inference using saved preprocessing artifacts
   monitor.py           - drift detection with Evidently
   api.py               - FastAPI endpoints
+models/                - saved model, preprocessing artifacts, metrics
 tests/                 - pytest unit + integration tests
 ```
+
+## Data & Methodology
+
+- **Leakage prevention**: Train/test split happens *before* fitting encoders and computing statistics (medians, count features)
+- **Stratified split**: 80/20 split preserving fraud rate (~3.5%) in both sets
+- **Preprocessing artifacts**: Label encoders, median values, and count mappings are saved and reused at inference to ensure consistency
+- **Unseen categories**: New categorical values at inference time are mapped to "unknown" (included in training vocabulary)
 
 ## CI/CD
 

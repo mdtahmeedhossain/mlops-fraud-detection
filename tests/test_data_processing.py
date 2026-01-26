@@ -2,12 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.data_processing import (
-    encode_categoricals,
-    engineer_features,
-    handle_missing_values,
-    select_features,
-)
+from src.preprocessing import FeaturePreprocessor
 
 
 @pytest.fixture
@@ -63,75 +58,104 @@ def sample_transaction_data():
     )
 
 
-class TestEngineerFeatures:
-    def test_creates_log_amount(self, sample_transaction_data):
-        result = engineer_features(sample_transaction_data)
+class TestFeaturePreprocessor:
+    def test_fit_transform_creates_engineered_features(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         assert "TransactionAmt_log" in result.columns
-        assert (result["TransactionAmt_log"] >= 0).all()
-
-    def test_creates_decimal_feature(self, sample_transaction_data):
-        result = engineer_features(sample_transaction_data)
         assert "TransactionAmt_decimal" in result.columns
-
-    def test_creates_time_features(self, sample_transaction_data):
-        result = engineer_features(sample_transaction_data)
         assert "Transaction_hour" in result.columns
         assert "Transaction_day" in result.columns
+        assert "card1_addr1_count" in result.columns
+
+    def test_fit_transform_log_amount_non_negative(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
+        assert (result["TransactionAmt_log"] >= 0).all()
+
+    def test_fit_transform_time_features_valid_range(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         assert result["Transaction_hour"].between(0, 24).all()
 
-    def test_creates_card_addr_count(self, sample_transaction_data):
-        result = engineer_features(sample_transaction_data)
-        assert "card1_addr1_count" in result.columns
+    def test_fit_transform_card_addr_count_positive(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         assert (result["card1_addr1_count"] >= 1).all()
 
-    def test_does_not_modify_original(self, sample_transaction_data):
+    def test_fit_transform_does_not_modify_original(self, sample_transaction_data):
         original_cols = set(sample_transaction_data.columns)
-        engineer_features(sample_transaction_data)
+        preprocessor = FeaturePreprocessor()
+        preprocessor.fit_transform(sample_transaction_data)
         assert set(sample_transaction_data.columns) == original_cols
 
-
-class TestEncodeCategoricals:
-    def test_encodes_categorical_columns(self, sample_transaction_data):
-        result, encoders = encode_categoricals(sample_transaction_data, fit=True)
+    def test_fit_transform_encodes_categoricals(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         assert result["ProductCD"].dtype in [np.int32, np.int64]
-        assert "ProductCD" in encoders
+        assert "ProductCD" in preprocessor.artifacts.label_encoders
 
-    def test_handles_nan_values(self, sample_transaction_data):
-        result, _ = encode_categoricals(sample_transaction_data, fit=True)
-        # Should not have NaN after encoding
+    def test_fit_transform_handles_nan_in_categoricals(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         for col in ["ProductCD", "card4", "card6"]:
             if col in result.columns:
                 assert not result[col].isna().any()
 
-    def test_transform_mode_uses_existing_encoders(self, sample_transaction_data):
-        _, encoders = encode_categoricals(sample_transaction_data, fit=True)
-        result, _ = encode_categoricals(
-            sample_transaction_data, encoders=encoders, fit=False
-        )
+    def test_transform_uses_fitted_encoders(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        preprocessor.fit_transform(sample_transaction_data)
+        result = preprocessor.transform(sample_transaction_data)
         assert result["ProductCD"].dtype in [np.int32, np.int64]
 
-
-class TestHandleMissingValues:
-    def test_fills_numeric_missing(self, sample_transaction_data):
-        result = handle_missing_values(sample_transaction_data)
+    def test_fit_transform_fills_numeric_missing(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         numeric_cols = result.select_dtypes(include=[np.number]).columns
         non_target = [c for c in numeric_cols if c != "isFraud"]
         for col in non_target:
             assert not result[col].isna().any(), f"Column {col} still has NaN"
 
-    def test_preserves_target(self, sample_transaction_data):
-        result = handle_missing_values(sample_transaction_data)
-        pd.testing.assert_series_equal(
-            result["isFraud"], sample_transaction_data["isFraud"]
-        )
-
-
-class TestSelectFeatures:
-    def test_returns_available_features(self, sample_transaction_data):
-        result = select_features(sample_transaction_data)
+    def test_fit_transform_preserves_target(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         assert "isFraud" in result.columns
-        assert "TransactionAmt" in result.columns
 
-    def test_excludes_non_feature_columns(self, sample_transaction_data):
-        result = select_features(sample_transaction_data)
+    def test_fit_transform_excludes_non_feature_columns(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        result = preprocessor.fit_transform(sample_transaction_data)
         assert "TransactionID" not in result.columns
+
+    def test_transform_handles_unseen_categories(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        preprocessor.fit_transform(sample_transaction_data)
+        # Create new data with unseen category
+        new_data = sample_transaction_data.copy()
+        new_data["ProductCD"] = "UNSEEN_CATEGORY"
+        # Should not raise, should map to "unknown"
+        result = preprocessor.transform(new_data)
+        assert not result["ProductCD"].isna().any()
+
+    def test_transform_uses_learned_medians(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        preprocessor.fit_transform(sample_transaction_data)
+        # Create data with all NaN for a numeric column
+        new_data = sample_transaction_data.copy()
+        new_data["C1"] = np.nan
+        result = preprocessor.transform(new_data)
+        # Should be filled with the learned median, not 0
+        expected_median = preprocessor.artifacts.medians.get("C1", 0.0)
+        assert (result["C1"] == expected_median).all()
+
+    def test_transform_raises_when_not_fitted(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        with pytest.raises(RuntimeError):
+            preprocessor.transform(sample_transaction_data)
+
+    def test_get_feature_columns_returns_list(self, sample_transaction_data):
+        preprocessor = FeaturePreprocessor()
+        preprocessor.fit_transform(sample_transaction_data)
+        cols = preprocessor.get_feature_columns()
+        assert isinstance(cols, list)
+        assert len(cols) > 0
+        assert "isFraud" not in cols

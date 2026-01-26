@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from src.predict import FraudPredictor
+from src.preprocessing import FeaturePreprocessor
 
 
 @pytest.fixture
@@ -14,15 +15,31 @@ def mock_model():
 
 
 @pytest.fixture
-def mock_feature_columns():
-    return ["TransactionAmt", "card1", "card2", "C1", "C2", "D1"]
+def mock_preprocessor():
+    preprocessor = MagicMock(spec=FeaturePreprocessor)
+    preprocessor.get_feature_columns.return_value = [
+        "TransactionAmt", "card1", "card2", "C1", "C2", "D1"
+    ]
+    # Mock transform to return a DataFrame with the expected columns
+    def mock_transform(data):
+        if isinstance(data, dict):
+            df = pd.DataFrame([data])
+        else:
+            df = data.copy()
+        # Return DataFrame with expected feature columns
+        result = pd.DataFrame(index=df.index)
+        for col in ["TransactionAmt", "card1", "card2", "C1", "C2", "D1"]:
+            result[col] = df.get(col, 0)
+        return result
+    preprocessor.transform.side_effect = mock_transform
+    return preprocessor
 
 
 @pytest.fixture
-def predictor_with_model(mock_model, mock_feature_columns):
+def predictor_with_model(mock_model, mock_preprocessor):
     pred = FraudPredictor()
     pred.model = mock_model
-    pred.feature_columns = mock_feature_columns
+    pred.preprocessor = mock_preprocessor
     pred.metrics = {"auc_roc": 0.95, "f1": 0.6}
     pred._loaded = True
     return pred
@@ -74,6 +91,7 @@ class TestFraudPredictor:
         assert info["model_type"] == "XGBClassifier"
         assert info["n_features"] == 6
         assert info["metrics"]["auc_roc"] == 0.95
+        assert "feature_columns" in info
 
     def test_is_loaded_property(self):
         pred = FraudPredictor()

@@ -21,6 +21,7 @@ from src.config import (
     MODEL_PARAMS,
     MODEL_PATH,
     MODELS_DIR,
+    PREPROCESSING_ARTIFACTS_PATH,
     PROCESSED_TEST_FILE,
     PROCESSED_TRAIN_FILE,
     TARGET,
@@ -32,9 +33,17 @@ logger = logging.getLogger(__name__)
 
 
 def load_processed_data() -> tuple[pd.DataFrame, pd.DataFrame]:
-    if not PROCESSED_TRAIN_FILE.exists() or not PROCESSED_TEST_FILE.exists():
-        logger.info("Processed data not found. Running data processing pipeline...")
-        return process_data()
+    # Check for all required artifacts - if any are missing, reprocess
+    artifacts_exist = (
+        PROCESSED_TRAIN_FILE.exists()
+        and PROCESSED_TEST_FILE.exists()
+        and PREPROCESSING_ARTIFACTS_PATH.exists()
+    )
+
+    if not artifacts_exist:
+        logger.info("Processed data or preprocessing artifacts not found. Running data processing pipeline...")
+        train_df, test_df, _ = process_data()
+        return train_df, test_df
 
     train_df = pd.read_parquet(PROCESSED_TRAIN_FILE)
     test_df = pd.read_parquet(PROCESSED_TEST_FILE)

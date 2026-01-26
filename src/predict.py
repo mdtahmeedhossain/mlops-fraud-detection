@@ -6,22 +6,26 @@ import numpy as np
 import pandas as pd
 
 from src.config import (
-    CATEGORICAL_FEATURES,
-    FEATURE_COLUMNS_PATH,
-    LABEL_ENCODERS_PATH,
     MODEL_PATH,
     TRAINING_METRICS_PATH,
 )
+from src.preprocessing import FeaturePreprocessor
 
 logger = logging.getLogger(__name__)
 
 
 class FraudPredictor:
+    """
+    Fraud prediction service that uses the same preprocessing pipeline as training.
+
+    This ensures consistency between training and inference, avoiding the
+    training/serving skew that can degrade model performance in production.
+    """
+
     def __init__(self):
         self.model = None
-        self.feature_columns = None
-        self.label_encoders = None
-        self.metrics = None
+        self.preprocessor: FeaturePreprocessor | None = None
+        self.metrics: dict | None = None
         self._loaded = False
 
     def load(self) -> None:
@@ -29,27 +33,22 @@ class FraudPredictor:
             raise FileNotFoundError(
                 f"Model not found at {MODEL_PATH}. Run training first."
             )
-        if not FEATURE_COLUMNS_PATH.exists():
-            raise FileNotFoundError(
-                f"Feature columns not found at {FEATURE_COLUMNS_PATH}. "
-                "Run training first."
-            )
 
         self.model = joblib.load(MODEL_PATH)
-        self.feature_columns = joblib.load(FEATURE_COLUMNS_PATH)
 
-        if LABEL_ENCODERS_PATH.exists():
-            self.label_encoders = joblib.load(LABEL_ENCODERS_PATH)
-        else:
-            self.label_encoders = {}
+        # Load the preprocessor with all artifacts
+        self.preprocessor = FeaturePreprocessor()
+        self.preprocessor.load()
 
         if TRAINING_METRICS_PATH.exists():
             with open(TRAINING_METRICS_PATH) as f:
                 self.metrics = json.load(f)
+        else:
+            self.metrics = {}
 
         self._loaded = True
         logger.info(
-            f"Model loaded. Features: {len(self.feature_columns)}, "
+            f"Model loaded. Features: {len(self.preprocessor.get_feature_columns())}, "
             f"AUC: {self.metrics.get('auc_roc', 'N/A')}"
         )
 
@@ -57,7 +56,19 @@ class FraudPredictor:
     def is_loaded(self) -> bool:
         return self._loaded
 
-    def predict(self, data: dict | pd.DataFrame) -> dict:
+    def predict(self, data: dict | pd.DataFrame) -> dict | list[dict]:
+        """
+        Make fraud predictions on input data.
+
+        The input data goes through the same preprocessing pipeline used during
+        training, ensuring consistent feature engineering and imputation.
+
+        Args:
+            data: Either a dict (single transaction) or DataFrame (batch)
+
+        Returns:
+            Prediction result(s) with fraud_probability, is_fraud, and confidence
+        """
         if not self._loaded:
             self.load()
 
@@ -66,22 +77,14 @@ class FraudPredictor:
         else:
             df = data.copy()
 
-        for col in CATEGORICAL_FEATURES:
-            if col in df.columns and self.label_encoders and col in self.label_encoders:
-                le = self.label_encoders[col]
-                known = set(le.classes_)
-                df[col] = df[col].fillna("unknown").astype(str)
-                df[col] = df[col].apply(lambda x, k=known: x if x in k else "unknown")
-                df[col] = le.transform(df[col])
+        # Apply the same preprocessing as training
+        df_processed = self.preprocessor.transform(df)
 
-        df = df.reindex(columns=self.feature_columns, fill_value=0)
-        df = df.fillna(0)
-
-        proba = self.model.predict_proba(df)[:, 1]
+        proba = self.model.predict_proba(df_processed)[:, 1]
         predictions = (proba >= 0.5).astype(int)
 
         results = []
-        for i in range(len(df)):
+        for i in range(len(df_processed)):
             results.append(
                 {
                     "fraud_probability": float(np.round(proba[i], 4)),
@@ -100,7 +103,8 @@ class FraudPredictor:
 
         return {
             "model_type": "XGBClassifier",
-            "n_features": len(self.feature_columns),
+            "n_features": len(self.preprocessor.get_feature_columns()),
+            "feature_columns": self.preprocessor.get_feature_columns(),
             "metrics": self.metrics,
             "model_path": str(MODEL_PATH),
         }

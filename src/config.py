@@ -14,6 +14,7 @@ REFERENCE_DATA_FILE = DATA_PROCESSED_DIR / "reference_data.parquet"
 MODEL_PATH = MODELS_DIR / "model.joblib"
 FEATURE_COLUMNS_PATH = MODELS_DIR / "feature_columns.joblib"
 LABEL_ENCODERS_PATH = MODELS_DIR / "label_encoders.joblib"
+PREPROCESSING_ARTIFACTS_PATH = MODELS_DIR / "preprocessing_artifacts.joblib"
 TRAINING_METRICS_PATH = MODELS_DIR / "metrics.json"
 
 NUMERIC_FEATURES = [
