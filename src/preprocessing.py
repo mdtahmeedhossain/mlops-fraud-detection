@@ -1,9 +1,4 @@
-"""
-Preprocessing module for consistent feature engineering between training and inference.
-
-This module ensures that the same transformations applied during training
-are replicated exactly during inference, avoiding training/serving skew.
-"""
+"""Shared preprocessing for training and inference."""
 
 import logging
 from dataclasses import dataclass, field
@@ -26,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PreprocessingArtifacts:
-    """Stores all artifacts needed to replicate preprocessing at inference time."""
+    """Artifacts for consistent preprocessing at inference."""
 
     medians: dict[str, float] = field(default_factory=dict)
     card1_addr1_counts: dict[str, int] = field(default_factory=dict)
@@ -35,12 +30,7 @@ class PreprocessingArtifacts:
 
 
 class FeaturePreprocessor:
-    """
-    Unified preprocessor for training and inference.
-
-    Ensures consistent feature engineering and imputation between training
-    and inference pipelines.
-    """
+    """Unified preprocessor for training and inference."""
 
     def __init__(self):
         self.artifacts = PreprocessingArtifacts()
@@ -51,14 +41,7 @@ class FeaturePreprocessor:
         return self._fitted
 
     def fit_transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Fit the preprocessor on training data and transform it.
-
-        This should only be called during training. It learns:
-        - Median values for numeric imputation
-        - card1_addr1 count mappings
-        - Label encodings for categorical features
-        """
+        """Fit on training data and transform. Only call during training."""
         df = df.copy()
 
         # Step 1: Engineer features (before learning medians)
@@ -87,12 +70,7 @@ class FeaturePreprocessor:
         return df
 
     def transform(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Transform data using fitted preprocessor.
-
-        This replicates the exact same transformations used during training,
-        using the learned artifacts (medians, count mappings, encoders).
-        """
+        """Transform data using fitted artifacts."""
         if not self._fitted:
             raise RuntimeError(
                 "Preprocessor not fitted. Call fit_transform first or load artifacts."
@@ -112,7 +90,6 @@ class FeaturePreprocessor:
         return df
 
     def _engineer_features(self, df: pd.DataFrame, fit: bool = False) -> pd.DataFrame:
-        """Create engineered features."""
         # TransactionAmt features
         if "TransactionAmt" in df.columns:
             df["TransactionAmt_log"] = np.log1p(df["TransactionAmt"])
@@ -147,7 +124,6 @@ class FeaturePreprocessor:
         return df
 
     def _encode_categoricals(self, df: pd.DataFrame, fit: bool = False) -> pd.DataFrame:
-        """Encode categorical features using label encoding."""
         for col in CATEGORICAL_FEATURES:
             if col not in df.columns:
                 continue
@@ -173,7 +149,6 @@ class FeaturePreprocessor:
         return df
 
     def _select_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Select relevant features for modeling."""
         engineered_features = [
             "TransactionAmt_log",
             "TransactionAmt_decimal",
@@ -191,7 +166,6 @@ class FeaturePreprocessor:
     def _handle_missing_values(
         self, df: pd.DataFrame, fit: bool = False
     ) -> pd.DataFrame:
-        """Impute missing values using medians learned from training."""
         for col in df.select_dtypes(include=[np.number]).columns:
             if col == TARGET:
                 continue
@@ -212,7 +186,6 @@ class FeaturePreprocessor:
         return df
 
     def _align_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure inference data has the same columns as training."""
         # Add missing columns with their median values
         for col in self.artifacts.feature_columns:
             if col not in df.columns:
@@ -226,7 +199,6 @@ class FeaturePreprocessor:
         return df[self.artifacts.feature_columns]
 
     def save(self, path=None) -> None:
-        """Save preprocessing artifacts to disk."""
         if not self._fitted:
             raise RuntimeError("Cannot save unfitted preprocessor")
 
@@ -239,7 +211,6 @@ class FeaturePreprocessor:
         logger.info(f"Label encoders saved to {LABEL_ENCODERS_PATH}")
 
     def load(self, path=None) -> None:
-        """Load preprocessing artifacts from disk."""
         load_path = path or PREPROCESSING_ARTIFACTS_PATH
 
         if not load_path.exists():
@@ -254,7 +225,6 @@ class FeaturePreprocessor:
         )
 
     def get_feature_columns(self) -> list[str]:
-        """Return the list of feature columns expected by the model."""
         if not self._fitted:
             raise RuntimeError("Preprocessor not fitted")
         return self.artifacts.feature_columns
