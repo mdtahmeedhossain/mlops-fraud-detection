@@ -1,0 +1,10 @@
+{
+  "total_transactions": 590540,
+  "total_features": 438,
+  "fraud_count": 20663,
+  "fraud_rate_pct": 3.5,
+  "median_amount_legit": 68.5,
+  "median_amount_fraud": 75.0,
+  "features_with_missing": 414,
+  "peak_fraud_hour": 7
+}

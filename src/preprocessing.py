@@ -195,8 +195,11 @@ class FeaturePreprocessor:
                     f"Column '{col}' missing in input, filled with {default_val}"
                 )
 
-        # Reorder to match training column order
-        return df[self.artifacts.feature_columns]
+        # Reorder to match training column order, preserving target if present
+        cols = self.artifacts.feature_columns.copy()
+        if TARGET in df.columns:
+            cols = cols + [TARGET]
+        return df[cols]
 
     def save(self, path=None) -> None:
         if not self._fitted:
